@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>LibMap - 図書館・書籍検索</title>
+  <script src="https://maps.googleapis.com/maps/api/js?v=3.exp&sensor=false&key=YOUR_GOOGLE_MAPS_API_KEY"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat&display=swap" rel="stylesheet">
+  <link href="https://calil.jp/public/css/calilapi.css" rel="stylesheet" type="text/css" />
+  <style>
+    body { font-family: Arial, sans-serif; }
+    h1 { font-family: 'Caveat', cursive; }
+    
+    #loading {
+      width: 100vw; height: 100vh; transition: all 1s;
+      background-color: #0bd; position: fixed;
+      top: 0; left: 0; z-index: 9999;
+    }
+    .loading_text {
+      font-size: 50px; font-weight: bold; color: #FFFFFF;
+      position: absolute; top: 40%; left: 50%;
+      transform: translate(-50%,-40%);
+    }
+    .loaded { opacity: 0; visibility: hidden; }
+    
+    .loader {
+      font-size: 10px; margin: 500px auto; text-indent: -9999em;
+      width: 11em; height: 11em; border-radius: 50%;
+      background: #ffffff;
+      background: linear-gradient(to right, #ffffff 10%, rgba(255, 255, 255, 0) 42%);
+      position: relative;
+      animation: load3 1.4s infinite linear;
+      transform: translateZ(0);
+    }
+    .loader:before {
+      width: 50%; height: 50%; background: #ffffff;
+      border-radius: 100% 0 0 0; position: absolute; top: 0; left: 0; content: '';
+    }
+    .loader:after {
+      background: #0bd; width: 75%; height: 75%;
+      border-radius: 50%; content: ''; margin: auto;
+      position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+    }
+    @keyframes load3 {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    #tabs { display: flex; margin-bottom: 10px; }
+    #tabs button {
+      flex: 1; padding: 10px; cursor: pointer;
+      background-color: #f1f1f1; border: 1px solid #ccc;
+      border-bottom: none; transition: all 0.3s ease;
+    }
+    #tabs button:hover { background-color: #AFB4DB; opacity: 0.8; }
+    #tabs button.active { background-color: #fff4db; border-bottom: 1px solid white; }
+    
+    .title_pattern {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 125px;
+      background-color: #bce2e8; opacity: 0.4; z-index: -1;
+    }
+    
+    #librarySection, #bookSection { display: none; }
+    #librarySection.active, #bookSection.active { display: block; }
+    
+    #container {
+      width: 500px; height: 500px; margin: 20px 0;
+      overflow-y: auto; border: 1px solid #ddd; padding: 10px;
+    }
+    
+    .search-form {
+      display: flex; flex-direction: column; align-items: flex-start;
+      gap: 9px; background-color: #f9f9f9; padding: 10px;
+      border: 1px solid #ddd; border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); max-width: 400px;
+    }
+    .search-form input[type="text"], .search-form select {
+      width: 90%; padding: 10px; font-size: 16px;
+      border: 1px solid #ccc; border-radius: 4px; outline: none;
+      transition: border-color 0.3s ease;
+    }
+    .search-form input[type="text"]:focus, .search-form select:focus {
+      border-color: #007bff; box-shadow: 0 0 4px rgba(0, 123, 255, 0.5);
+    }
+    .search-form button {
+      padding: 10px 20px; background-color: #007bff; color: white;
+      border: none; border-radius: 4px; cursor: pointer;
+      font-size: 16px; transition: background-color 0.3s ease; width: 100%;
+    }
+    .search-form button:hover { background-color: #0056b3; }
+    .search-form label { font-size: 14px; font-weight: bold; margin-bottom: 5px; display: block; }
+    
+    .legend-list { list-style: none; padding: 0; }
+    .legend-list li { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+  <h1>LibMap</h1>
+  <div class="title_pattern"></div>
+  
+  <div id="loading">
+    <div class="loader"></div>
+    <p class="loading_text">loading...</p>
+  </div>
+
+  <div id="tabs">
+    <button id="libraryTab" class="active">図書館マップ</button>
+    <button id="bookTab" class="inactive">書籍検索</button>
+  </div>
+
+  <div id="librarySection" class="active">
+    <div id="pref" style="display: none;">
+      選択状況: <strong id="pref_name"></strong>
+      <span id="lib_select">
+        <a href="javascript:citySelector.showDlg();">市町村を変更する</a>
+      </span>
+    </div>
+    
+    <div class="search-form">
+      <label for="prefInput">都道府県</label>
+      <input type="text" id="prefInput" placeholder="例: 茨城県" />
+
+      <label for="cityInput">市町村</label>
+      <input type="text" id="cityInput" placeholder="例: 水戸市" />
+
+      <button id="searchLibraryBtn">市町村から検索</button>
+      
+      <label for="limitLoc">現在地を中心に表示する件数</label>
+      <select id="limitLoc">
+        <option value="10">10</option>
+        <option value="20" selected>20</option>
+        <option value="30">30</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+      <button id="searchLibraryBtnLoc">現在位置から検索</button>
+    </div>
+    
+    <div id="mapContainer" style="width: 650px; height: 650px; margin-top: 15px;"></div>
+    
+    <ul class="legend-list">
+      <li><img src="SMALL.svg" width="30" height="30"> 図書室・公民館</li>
+      <li><img src="MEDIUM.svg" width="30" height="30"> 図書館(地域)</li>
+      <li><img src="LARGE.svg" width="30" height="30"> 図書館(広域)</li>
+      <li><img src="UNIV.svg" width="30" height="30"> 大学</li>
+      <li><img src="SPECIAL.svg" width="30" height="30"> 専門</li>
+      <li><img src="BM.svg" width="30" height="30"> 移動・BM</li>
+      <li><img src="mark_batsu.png" width="30" height="30"> 貸出中</li>
+      <li><img src="mark_sankaku.png" width="30" height="30"> 相互利用で借りられる可能性高い</li>
+    </ul>
+  </div>
+
+  <div id="bookSection">
+    <div class="search-form">
+      <label for="titleInput">タイトル:</label>
+      <input type="text" id="titleInput" placeholder="例: 吾輩は猫である" />
+      <button id="searchBookBtn">タイトルで書籍検索</button>
+
+      <label for="authorInput">著者:</label>
+      <input type="text" id="authorInput" placeholder="例: 夏目漱石" />
+      <button id="searchBookBtnAuthor">著者で書籍検索</button>
+
+      <label for="isbnInput">ISBN:</label>
+      <input type="text" id="isbnInput" placeholder="例: 9784621308981" />
+      <button id="searchIsbn">ISBNで市町村を選んで、蔵書検索</button>
+      <button id="searchIsbnLoc">ISBNで現在地から、蔵書検索</button>
+    </div>
+    <div id="container"></div>
+  </div>
+
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.3.2/jquery.min.js"></script>
+  <script src="https://calil.jp/public/js/calilapi.js"></script>
+
+  <script>
+    /* =========================================================
+       API設定 (公開用にダミーのキーを設定しています)
+    ========================================================= */
+    const API_CONFIG = {
+      CALIL_URL: "https://api.calil.jp/library",
+      CALIL_CHECK_URL: "https://api.calil.jp/check",
+      CALIL_KEY: "YOUR_CALIL_API_KEY", // ← ここをご自身のカーリルAPIキーに書き換えてください
+      RAKUTEN_URL: "https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404",
+      RAKUTEN_ID: "YOUR_RAKUTEN_API_KEY" // ← ここをご自身の楽天APIキーに書き換えてください
+    };
+
+    const ICONS = {
+      SMALL: 'SMALL.svg',
+      MEDIUM: 'MEDIUM.svg',
+      LARGE: 'LARGE.svg',
+      UNIV: 'UNIV.svg',
+      SPECIAL: 'SPECIAL.svg',
+      BM: 'BM.svg',
+      UNAVAILABLE: 'mark_batsu.png',
+      INTERLIBRARY: 'mark_sankaku.png',
+      DEFAULT: 'sample.png'
+    };
+
+    const appState = {
+      searchMode: 'library', // 'library' or 'isbn'
+      selectedIsbn: null,
+      isLocationSearch: false,
+      pollingPhase: 0, 
+      location: { lat: 35.680959, lng: 139.767306 },
+      systemIdList: ["Tokyo_Setagaya"],
+      pendingLibraries: {},
+      libkeysFinal: {}
+    };
+
+    let map;
+    let markers = [];
+    let infoWindow;
+    let citySelector;
+
+    /* =========================================================
+       初期化・イベント設定
+    ========================================================= */
+    window.onload = function () {
+      document.getElementById("loading").classList.add("loaded");
+      initMap();
+      initCitySelector();
+      setupEventListeners();
+    };
+
+    function initMap() {
+      const mapContainer = document.getElementById("mapContainer");
+      map = new google.maps.Map(mapContainer, {
+        zoom: 12,
+        center: new google.maps.LatLng(appState.location.lat, appState.location.lng),
+      });
+      infoWindow = new google.maps.InfoWindow();
+    }
+
+    function initCitySelector() {
+      citySelector = new CalilCitySelectDlg({
+        'appkey': API_CONFIG.CALIL_KEY,
+        'select_func': onCitySelected
+      });
+    }
+
+    function setupEventListeners() {
+      const libraryTab = document.getElementById("libraryTab");
+      const bookTab = document.getElementById("bookTab");
+      const librarySection = document.getElementById("librarySection");
+      const bookSection = document.getElementById("bookSection");
+
+      libraryTab.addEventListener("click", () => switchTab(libraryTab, bookTab, librarySection, bookSection));
+      bookTab.addEventListener("click", () => switchTab(bookTab, libraryTab, bookSection, librarySection));
+
+      document.getElementById("searchLibraryBtn").addEventListener("click", () => {
+        resetForms(["isbnInput", "titleInput", "authorInput"]);
+        searchLibrariesByText();
+      });
+
+      document.getElementById("searchLibraryBtnLoc").addEventListener("click", () => {
+        resetForms(["cityInput", "prefInput", "isbnInput", "titleInput", "authorInput"]);
+        fetchCurrentLocation(searchLibrariesByLocation);
+      });
+
+      document.getElementById("searchBookBtn").addEventListener("click", () => {
+        resetForms(["prefInput", "cityInput", "authorInput", "isbnInput"]);
+        searchBooks('title');
+      });
+
+      document.getElementById("searchBookBtnAuthor").addEventListener("click", () => {
+        resetForms(["prefInput", "cityInput", "titleInput", "isbnInput"]);
+        searchBooks('author');
+      });
+
+      document.getElementById("searchIsbn").addEventListener("click", () => {
+        resetForms(["prefInput", "cityInput"]);
+        startIsbnSearchByCity();
+      });
+
+      document.getElementById("searchIsbnLoc").addEventListener("click", () => {
+        resetForms(["prefInput", "cityInput"]);
+        startIsbnSearchByLocation();
+      });
+    }
+
+    /* =========================================================
+       UI・ユーティリティ関数
+    ========================================================= */
+    function switchTab(activeTab, inactiveTab, activeSection, inactiveSection) {
+      activeTab.classList.add("active");
+      inactiveTab.classList.remove("active");
+      activeSection.classList.add("active");
+      inactiveSection.classList.remove("active");
+    }
+
+    function resetForms(elementIds) {
+      elementIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+      });
+    }
+
+    function clearMarkers() {
+      markers.forEach(marker => marker.setMap(null));
+      markers = [];
+    }
+
+    function updatePrefDisplay(text) {
+      $("#pref").show();
+      $("#pref_name").html(text);
+    }
+
+    function appendJsonpScript(url) {
+      const script = document.createElement("script");
+      script.src = url;
+      script.onload = () => script.remove();
+      document.body.appendChild(script);
+    }
+
+    function calculateMedianCenter(data) {
+      if (!data || data.length === 0) return null;
+      const latitudes = data.map(lib => Number(lib.geocode.split(",")[1])).sort((a, b) => a - b);
+      const longitudes = data.map(lib => Number(lib.geocode.split(",")[0])).sort((a, b) => a - b);
+      const getMedian = (values) => {
+        const mid = Math.floor(values.length / 2);
+        return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+      };
+      return { lat: getMedian(latitudes), lng: getMedian(longitudes) };
+    }
+
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const toRadians = deg => deg * (Math.PI / 180);
+      const a = Math.sin(toRadians(lat2 - lat1)/2) ** 2 +
+                Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+                Math.sin(toRadians(lon2 - lon1)/2) ** 2;
+      return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 100) / 100;
+    }
+
+    function addLocationMarker(lat, lng) {
+      const marker = new google.maps.Marker({
+        position: { lat, lng }, map: map, title: "現在位置",
+      });
+      marker.addListener("click", () => {
+        infoWindow.setContent(`<div><h3>現在地</h3><p>緯度: ${lat}</p><p>経度: ${lng}</p></div>`);
+        infoWindow.open(map, marker);
+      });
+      markers.push(marker);
+    }
+
+    /* =========================================================
+       標準・図書館検索機能
+    ========================================================= */
+    function onCitySelected(systemidList, prefName) {
+      appState.systemIdList = systemidList;
+      updatePrefDisplay(prefName);
+
+      if (appState.searchMode === 'library') {
+        document.getElementById("libraryTab").click();
+        clearMarkers();
+        systemidList.forEach(id => {
+          const url = `${API_CONFIG.CALIL_URL}?appkey=${API_CONFIG.CALIL_KEY}&systemid=${id}&format=json&callback=handleLibraryResponse`;
+          appendJsonpScript(url);
+        });
+      } else if (appState.searchMode === 'isbn') {
+        fetchLibrariesByISBN(appState.selectedIsbn, systemidList);
+      }
+    }
+
+    function searchLibrariesByText() {
+      const pref = document.getElementById("prefInput").value.trim();
+      const city = document.getElementById("cityInput").value.trim();
+      if (!pref || !city) return alert("都道府県と市町村を入力してください");
+
+      appState.searchMode = 'library';
+      clearMarkers();
+      updatePrefDisplay(`${pref}${city}`);
+      const url = `${API_CONFIG.CALIL_URL}?appkey=${API_CONFIG.CALIL_KEY}&pref=${encodeURIComponent(pref)}&city=${encodeURIComponent(city)}&format=json&callback=handleLibraryResponse`;
+      appendJsonpScript(url);
+    }
+
+    function fetchCurrentLocation(callback) {
+      if (!navigator.geolocation) return alert("このブラウザは位置情報に対応していません。");
+      navigator.geolocation.getCurrentPosition(callback, err => {
+        alert("現在位置を取得できませんでした。");
+      });
+    }
+
+    function searchLibrariesByLocation(position) {
+      appState.searchMode = 'library';
+      appState.isLocationSearch = true;
+      appState.location = { lat: position.coords.latitude, lng: position.coords.longitude };
+      
+      const limit = document.getElementById("limitLoc").value.trim();
+      updatePrefDisplay(`現在地 (緯度:${appState.location.lat} 経度:${appState.location.lng})`);
+      clearMarkers();
+
+      const url = `${API_CONFIG.CALIL_URL}?appkey=${API_CONFIG.CALIL_KEY}&geocode=${appState.location.lng},${appState.location.lat}&limit=${limit}&format=json&callback=handleLibraryResponse`;
+      appendJsonpScript(url);
+    }
+
+    window.handleLibraryResponse = function(data) {
+      if (!data || data.length === 0) return alert("図書館が見つかりませんでした。");
+      const center = calculateMedianCenter(data);
+      if (center) map.setCenter(center);
+
+      if (appState.isLocationSearch) {
+        addLocationMarker(appState.location.lat, appState.location.lng);
+        appState.isLocationSearch = false;
+      }
+
+      data.forEach(library => {
+        const [lng, lat] = library.geocode.split(",").map(Number);
+        const marker = new google.maps.Marker({
+          position: { lat, lng }, map: map,
+          icon: ICONS[library.category] || ICONS.DEFAULT, title: library.formal
+        });
+
+        marker.addListener("click", () => {
+          infoWindow.setContent(`
+            <div>
+              <h3>${library.formal}</h3>
+              <p><strong>住所:</strong> ${library.address}</p>
+              <p><strong>電話番号:</strong> ${library.tel}</p>
+              <p><strong>SystemID:</strong> ${library.systemid}</p>
+              <p><a href="${library.url_pc}" target="_blank">ウェブサイト</a></p>
+            </div>
+          `);
+          infoWindow.open(map, marker);
+        });
+        markers.push(marker);
+      });
+    };
+
+    /* =========================================================
+       楽天ブックスAPI検索
+    ========================================================= */
+    function searchBooks(type) {
+      const inputId = type === 'title' ? 'titleInput' : 'authorInput';
+      const query = document.getElementById(inputId).value.trim();
+      if (!query) return alert(`${type === 'title' ? 'タイトル' : '著者'}を入力してください`);
+
+      const url = `${API_CONFIG.RAKUTEN_URL}?applicationId=${API_CONFIG.RAKUTEN_ID}&${type}=${encodeURIComponent(query)}`;
+      fetch(url)
+        .then(res => res.json())
+        .then(renderBookResults)
+        .catch(err => alert("書籍データの取得中にエラーが発生しました。"));
+    }
+
+    function renderBookResults(data) {
+      const container = document.getElementById("container");
+      container.innerHTML = "";
+      if (!data.Items || data.Items.length === 0) return container.innerHTML = "<p>書籍が見つかりませんでした。</p>";
+
+      data.Items.forEach(book => {
+        const item = book.Item;
+        const div = document.createElement("div");
+        div.style.marginBottom = "20px";
+        div.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <img src="${item.largeImageUrl || ''}" alt="書影" style="width: 80px; height: auto;" />
+            <div>
+              <h3>${item.title || "タイトル不明"}</h3>
+              <p><strong>著者:</strong> ${item.author || "著者不明"} | <strong>ISBN:</strong> ${item.isbn}</p>
+              <button class="btn-city-search" data-isbn="${item.isbn}">市町村を選択して検索</button>
+              <button class="btn-loc-search" data-isbn="${item.isbn}">現在位置から検索</button>
+            </div>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+
+      document.querySelectorAll('.btn-city-search').forEach(btn => {
+        btn.addEventListener('click', e => {
+          appState.selectedIsbn = e.target.getAttribute("data-isbn");
+          appState.searchMode = 'isbn';
+          citySelector.showDlg();
+        });
+      });
+
+      document.querySelectorAll('.btn-loc-search').forEach(btn => {
+        btn.addEventListener('click', e => {
+          appState.selectedIsbn = e.target.getAttribute("data-isbn");
+          startIsbnSearchByLocation();
+        });
+      });
+    }
+
+    /* =========================================================
+       蔵書検索 (ISBN x 市町村) ポーリング処理
+    ========================================================= */
+    function startIsbnSearchByCity() {
+      const isbn = document.getElementById("isbnInput").value.trim();
+      if (!isbn) return alert("ISBNを入力してください");
+      appState.selectedIsbn = isbn;
+      appState.searchMode = 'isbn';
+      citySelector.showDlg();
+    }
+
+    function fetchLibrariesByISBN(isbn, systemidList) {
+      appState.selectedIsbn = isbn;
+      appState.systemIdList = systemidList;
+      clearMarkers();
+      const url = `${API_CONFIG.CALIL_CHECK_URL}?appkey=${API_CONFIG.CALIL_KEY}&isbn=${isbn}&systemid=${systemidList.join(',')}&format=json&callback=handleLibraryResponseByISBN`;
+      appendJsonpScript(url);
+    }
+
+    window.handleLibraryResponseByISBN = function(data) {
+      const loader = document.getElementById("loading");
+      document.getElementById("libraryTab").click();
+
+      if (!data || !data.books) return alert("データが見つかりませんでした。");
+
+      if (data.continue === 1) {
+        setTimeout(() => fetchLibrariesByISBN(appState.selectedIsbn, appState.systemIdList), 1000);
+        loader.classList.remove("loaded");
+        return;
+      }
+
+      loader.classList.add("loaded");
+      let found = false;
+      appState.libkeysFinal = {};
+
+      for (const isbn in data.books) {
+        for (const systemid in data.books[isbn]) {
+          const libkeys = data.books[isbn][systemid].libkey;
+          if (libkeys) {
+            for (const [library, status] of Object.entries(libkeys)) {
+              if (status === "貸出可" || status === "貸出中") {
+                found = true;
+                appState.libkeysFinal[systemid] = "相互貸借可能性高";
+                appState.libkeysFinal[`${systemid},${library}`] = status;
+                const url = `${API_CONFIG.CALIL_URL}?appkey=${API_CONFIG.CALIL_KEY}&systemid=${systemid}&format=json&callback=handleLibraryResponse2`;
+                appendJsonpScript(url);
+              }
+            }
+          }
+        }
+      }
+      if (!found) alert("貸出可能な図書館が見つかりませんでした。");
+    };
+
+    window.handleLibraryResponse2 = function(data) {
+      if (!data || data.length === 0) return;
+      const center = calculateMedianCenter(data);
+      if (center) map.setCenter(center);
+
+      data.forEach(library => {
+        const key = `${library.systemid},${library.libkey}`;
+        const sysKey = `${library.systemid}`;
+        
+        if (appState.libkeysFinal[key] || appState.libkeysFinal[sysKey]) {
+          const status = appState.libkeysFinal[key];
+          const [lng, lat] = library.geocode.split(",").map(Number);
+          
+          let icon = ICONS.INTERLIBRARY;
+          let displayStatus = appState.libkeysFinal[sysKey];
+
+          if (status === "貸出可" || status === "貸出中") {
+            icon = status === "貸出中" ? ICONS.UNAVAILABLE : (ICONS[library.category] || ICONS.DEFAULT);
+            displayStatus = status;
+          }
+
+          const marker = new google.maps.Marker({ position: { lat, lng }, map: map, icon: icon, title: library.formal });
+          marker.addListener("click", () => {
+            infoWindow.setContent(`
+              <div>
+                <h3>${library.formal}</h3>
+                <p><strong>住所:</strong> ${library.address}</p>
+                <p><strong>電話番号:</strong> ${library.tel}</p>
+                <p><strong>SystemID:</strong> ${library.systemid}</p> <p><strong>貸出状況:</strong> ${displayStatus}</p>
+                <p><a href="${library.url_pc}" target="_blank">ウェブサイト</a></p>
+              </div>
+            `);
+            infoWindow.open(map, marker);
+          });
+          markers.push(marker);
+        }
+      });
+    };
+
+    /* =========================================================
+       蔵書検索 (ISBN x 現在地) ポーリング処理
+    ========================================================= */
+    function startIsbnSearchByLocation() {
+      const isbn = document.getElementById("isbnInput").value.trim() || appState.selectedIsbn;
+      if (!isbn) return alert("ISBNを入力してください");
+      appState.selectedIsbn = isbn;
+      fetchCurrentLocation(position => {
+        appState.location = { lat: position.coords.latitude, lng: position.coords.longitude };
+        fetchLibrariesByISBNAndLocation();
+      });
+    }
+
+    function fetchLibrariesByISBNAndLocation() {
+      const limit = document.getElementById("limitLoc").value.trim();
+      updatePrefDisplay(`現在地 緯度:${appState.location.lat} 東経:${appState.location.lng}`);
+      document.getElementById("libraryTab").click();
+      clearMarkers();
+
+      appState.isLocationSearch = true;
+      appState.pollingPhase = 0; // 0: システムID収集, 1: マーカー描画
+
+      const url = `${API_CONFIG.CALIL_URL}?appkey=${API_CONFIG.CALIL_KEY}&geocode=${appState.location.lng},${appState.location.lat}&limit=${limit}&format=json&callback=handleLibraryResponseLocbook`;
+      appendJsonpScript(url);
+    }
+
+    window.handleLibraryResponseLocbook = function(data) {
+      if (!data || data.length === 0) return alert("図書館が見つかりませんでした。");
+
+      if (appState.pollingPhase === 0) {
+        const center = calculateMedianCenter(data);
+        if (center) map.setCenter(center);
+        if (appState.isLocationSearch) {
+          addLocationMarker(appState.location.lat, appState.location.lng);
+          appState.isLocationSearch = false;
+        }
+        const systemIds = [...new Set(data.map(lib => lib.systemid))];
+        fetchBookAvailability(appState.selectedIsbn, systemIds);
+
+      } else {
+        let found = false;
+        data.forEach(library => {
+          const key = `${library.systemid},${library.libkey}`;
+          const sysKey = `${library.systemid}`;
+          const status = appState.pendingLibraries[key];
+          const sysStatus = appState.pendingLibraries[sysKey];
+
+          if (status || sysStatus) {
+            found = true;
+            let icon = ICONS.INTERLIBRARY;
+            let displayStatus = sysStatus;
+
+            if (status === "貸出可" || status === "貸出中") {
+              icon = status === "貸出中" ? ICONS.UNAVAILABLE : (ICONS[library.category] || ICONS.DEFAULT);
+              displayStatus = status;
+            }
+
+            const [lng, lat] = library.geocode.split(",").map(Number);
+            const dist = calculateDistance(lat, lng, appState.location.lat, appState.location.lng);
+            const marker = new google.maps.Marker({ position: { lat, lng }, map: map, icon: icon, title: library.formal });
+
+            marker.addListener("click", () => {
+              infoWindow.setContent(`
+                <div>
+                  <h3>${library.formal}</h3>
+                  <p><strong>住所:</strong> ${library.address}</p>
+                  <p><strong>距離:</strong> ${dist} km</p>
+                  <p><strong>SystemID:</strong> ${library.systemid}</p> <p><strong>貸出状況:</strong> ${displayStatus}</p>
+                  <p><a href="${library.url_pc}" target="_blank">ウェブサイト</a></p>
+                </div>
+              `);
+              infoWindow.open(map, marker);
+            });
+            markers.push(marker);
+          }
+        });
+        if (!found) alert("周辺で対象書籍を所蔵している図書館が見つかりませんでした。");
+        appState.pollingPhase = 0;
+        appState.pendingLibraries = {};
+      }
+    };
+
+    function fetchBookAvailability(isbn, systemIds) {
+      const url = `${API_CONFIG.CALIL_CHECK_URL}?appkey=${API_CONFIG.CALIL_KEY}&isbn=${isbn}&systemid=${systemIds.join(',')}&format=json&callback=handleBookAvailabilityResponse`;
+      appendJsonpScript(url);
+    }
+
+    window.handleBookAvailabilityResponse = function(data) {
+      const loader = document.getElementById("loading");
+
+      if (data.continue === 1) {
+        setTimeout(() => {
+          const url = `${API_CONFIG.CALIL_CHECK_URL}?appkey=${API_CONFIG.CALIL_KEY}&session=${data.session}&format=json&callback=handleBookAvailabilityResponse`;
+          appendJsonpScript(url);
+        }, 1000);
+        loader.classList.remove("loaded");
+        return;
+      }
+
+      loader.classList.add("loaded");
+      for (const isbn in data.books) {
+        for (const systemId in data.books[isbn]) {
+          const libkeys = data.books[isbn][systemId].libkey;
+          for (const libraryName in libkeys) {
+            const status = libkeys[libraryName];
+            if (["貸出可", "蔵書あり", "館内のみ", "貸出中", "予約中", "準備中", "蔵書なし"].includes(status)) {
+              appState.pendingLibraries[systemId] = "相互貸借可能性高";
+              appState.pendingLibraries[`${systemId},${libraryName}`] = status;
+            }
+          }
+        }
+      }
+
+      appState.pollingPhase = 1;
+      const limit = document.getElementById("limitLoc").value.trim();
+      const url = `${API_CONFIG.CALIL_URL}?appkey=${API_CONFIG.CALIL_KEY}&geocode=${appState.location.lng},${appState.location.lat}&limit=${limit}&format=json&callback=handleLibraryResponseLocbook`;
+      appendJsonpScript(url);
+    };
+  </script>
+  
+  <a href="https://webservice.rakuten.co.jp/" target="_blank">
+    <img src="https://webservice.rakuten.co.jp/img/credit/200709/credit_22121.gif" border="0" alt="Rakuten Web Service Center" title="Rakuten Web Service Center" width="221" height="21"/>
+  </a>
+</body>
+</html>
